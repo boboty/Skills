@@ -288,7 +288,8 @@ def compute_month(store: Store, period: str, _depth: int = 0) -> CloseReport:
                     kind="loss", key=r.get("调整ID"), sku=sku, wh=r.get("仓库"),
                     biz_date=r.get("业务日期") or "", created_at=r.get("录入时间") or "",
                     qty=-_num(r, "数量"), row_number=0))
-        cons.sort(key=lambda c: (c.biz_date, c.created_at, c.key))
+        # 冻结规则: 行序=记录ID升序, 确定可复现
+        cons.sort(key=lambda c: c.key)
         m.consumption = cons
         total_out_qty = sum((c.qty for c in cons), Decimal("0"))
         if m.pool_qty == 0 and (total_out_qty > 0 or m.pool_amount != 0):
