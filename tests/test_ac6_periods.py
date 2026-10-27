@@ -114,3 +114,18 @@ def test_reopen_cascade_and_recompute(masters):
     # 2 月起点变化 -> 2 月结果必须重算(而非沿用旧值)
     assert m2_after.end_amount != m2_before.end_amount
     assert closed(masters, "2026-02") == "已结账"
+
+def test_audit_trail_covers_init_close_reopen(masters):
+    """操作记录必须持久化 init/final_close/reopen(audit 先于 save)。"""
+    post_opening(masters, [{"SKU": "SKU-001", "仓库": "A", "数量": 10, "单价": 10}])
+    close_final(masters, "2026-01")
+    reopen(masters, "2026-01", auth="AUTH-AUDIT", reason="审计轨迹验证")
+    with open_write(masters) as st:
+        ops = [r.get("操作类型") for r in st.read_all("操作记录")]
+        rows = [r for r in st.read_all("操作记录")]
+    assert len(rows) >= 3, f"审计行不足: {len(rows)}"
+    assert "init" in ops
+    assert "close" in ops
+    assert "reopen" in ops
+    rp = [r for r in rows if r.get("操作类型") == "reopen"][0]
+    assert "AUTH-AUDIT" in rp.get("变更摘要")

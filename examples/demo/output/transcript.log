@@ -154,3 +154,81 @@ drwxr-xr-x@  5 yanbo  staff    160 Oct 27 17:26 ..
 -rw-r--r--@  1 yanbo  staff  20046 Oct 27 17:28 进销存台账.xlsx
 drwxr-xr-x@ 30 yanbo  staff    960 Oct 27 17:28 backups
 -rw-r--r--@  1 yanbo  staff  24370 Oct 27 17:28 transcript.log
+### ===== 进销存台账 V1 模拟日常业务(演示/验收证据) =====
+### 时间: 2026-10-27 17:44:41
+### --- 1. 初始化台账 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py init --path output/进销存台账.xlsx --company 演示商贸有限公司 --start-period 2026-01 --operator demo
+{"ok": true, "path": "output/进销存台账.xlsx", "company": "演示商贸有限公司", "start_period": "2026-01"}
+### --- 2. 商品/仓库建档 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py sku add --path output/进销存台账.xlsx --sku SKU-001 --name 演示商品甲 --unit 件 --operator demo
+{"ok": true, "sku": "SKU-001"}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py sku add --path output/进销存台账.xlsx --sku SKU-002 --name 演示商品乙 --unit 个 --operator demo
+{"ok": true, "sku": "SKU-002"}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py wh add --path output/进销存台账.xlsx --wh W01 --name 主仓 --operator demo
+{"ok": true, "wh": "W01"}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py wh add --path output/进销存台账.xlsx --wh W02 --name 分仓 --operator demo
+{"ok": true, "wh": "W02"}
+### --- 3. 期初库存: 预览 -> 确认提交 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/01_期初.csv --type opening --preview
+{"ok": true, "type": "opening", "file": "01_期初.csv", "file_hash": "a8877ed7b01f190b", "mapping": {"SKU": "SKU", "仓库": "仓库", "数量": "数量", "单价": "单价"}, "ok_count": 3, "reject_count": 0, "pending_count": 0, "imported_before": false, "prior_batch": "", "rejected": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/01_期初.csv --type opening --commit --confirm 用户确认期初 --operator demo
+{"ok": 3, "batch": "B20261027174442-000001", "rejected": 0, "pending": 0, "reject_detail": []}
+### --- 4. 采购入库(两单, 含批次/多行) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/02_采购_01.csv --type purchase --commit --confirm 用户确认采购 --operator demo
+{"ok": 2, "batch": "B20261027174442-000002", "rejected": 0, "pending": 0, "reject_detail": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/03_采购_02.csv --type purchase --commit --confirm 用户确认采购 --operator demo
+{"ok": 1, "batch": "B20261027174442-000003", "rejected": 0, "pending": 0, "reject_detail": []}
+### --- 5. 销售出库(两单, 跨仓) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/04_销售_01.csv --type sale --commit --confirm 用户确认销售 --operator demo
+{"ok": 2, "batch": "B20261027174442-000004", "rejected": 0, "pending": 0, "reject_detail": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/05_销售_02.csv --type sale --commit --confirm 用户确认销售 --operator demo
+{"ok": 1, "batch": "B20261027174443-000005", "rejected": 0, "pending": 0, "reject_detail": []}
+### --- 6. 跨仓调拨 W01 -> W02 20 件 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/06_调拨.csv --type transfer --commit --confirm 用户确认调拨 --operator demo
+{"ok": 1, "batch": "B20261027174443-000006", "rejected": 0, "pending": 0, "reject_detail": []}
+### --- 7. 库存调整: 报废 SKU-002 5 个 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/07_调整.csv --type adjust --commit --confirm 用户确认调整 --operator demo
+{"ok": 1, "batch": "B20261027174443-000007", "rejected": 0, "pending": 0, "reject_detail": []}
+### --- 8. 附加费用 150 元(按数量比例分摊到 PO-001 两行) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/08_费用.csv --type fee --commit --confirm 用户确认费用 --operator demo
+{"ok": 1, "batch": "B20261027174443-000008", "rejected": 0, "pending": 0, "reject_detail": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py fee allocate --path output/进销存台账.xlsx --fee-id FEE-000001 --preview
+{"ok": true, "fee_id": "FEE-000001", "rule": "按数量比例", "related_doc": "PO-001", "period": "2026-01", "total": "150.00", "fee_status": "未分摊", "rows": [{"入库ID": "IN-000001", "数量": "100", "金额": "1200"}, {"入库ID": "IN-000002", "数量": "100", "金额": "520"}], "alloc": {"IN-000001": "75.00", "IN-000002": "75.00"}}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py fee allocate --path output/进销存台账.xlsx --fee-id FEE-000001 --confirm 用户确认分摊 --operator demo
+{"ok": true, "fee_id": "FEE-000001", "rule": "按数量比例", "total": "150.00", "alloc": {"IN-000001": "75.00", "IN-000002": "75.00"}}
+### --- 9. 月末试结账(只计算, 不落盘) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py close dry --path output/进销存台账.xlsx --period 2026-01
+{"ok": true, "期间": "2026-01", "异常": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query monthly --path output/进销存台账.xlsx --period 2026-01
+{"ok": true, "期间": "2026-01", "状态": "暂估", "SKU": [{"SKU": "SKU-001", "期初数量": "150", "期初金额": "1500", "计价入库数量": "180", "计价入库金额": "2240", "附加费用分摊额": "75", "出库数量": "70", "出库成本": "809.24", "期末数量": "260", "期末金额": "3005.76", "加权单价": "11.5606"}, {"SKU": "SKU-002", "期初数量": "200", "期初金额": "1000", "计价入库数量": "100", "计价入库金额": "520", "附加费用分摊额": "75", "出库数量": "150", "出库成本": "824.09", "期末数量": "145", "期末金额": "770.91", "加权单价": "5.3167"}]}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query stock --path output/进销存台账.xlsx
+{"ok": true, "期间": "2026-01", "状态": "暂估", "仓库": [{"期间": "2026-01", "SKU": "SKU-001", "仓库": "W01", "期初数量": "100", "计价入库数量": "100", "出库数量": "40", "调整数量": "0", "调拨净": "-20", "期末数量": "140"}, {"期间": "2026-01", "SKU": "SKU-001", "仓库": "W02", "期初数量": "50", "计价入库数量": "80", "出库数量": "30", "调整数量": "0", "调拨净": "20", "期末数量": "120"}, {"期间": "2026-01", "SKU": "SKU-002", "仓库": "W01", "期初数量": "200", "计价入库数量": "100", "出库数量": "150", "调整数量": "-5", "调拨净": "0", "期末数量": "145"}], "公司": [{"SKU": "SKU-001", "期末数量": "260", "期末金额": "3005.76", "加权单价": "11.5606", "待确认数量": "0"}, {"SKU": "SKU-002", "期末数量": "145", "期末金额": "770.91", "加权单价": "5.3167", "待确认数量": "0"}]}
+### --- 10. 正式结账 2026-01(用户确认) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py close final --path output/进销存台账.xlsx --period 2026-01 --confirm 用户确认结账 --operator demo
+{"ok": true, "期间": "2026-01", "异常": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query status --path output/进销存台账.xlsx
+{"ok": true, "公司": "演示商贸有限公司", "币种": "CNY", "成本方法": "月末一次加权平均", "起始期间": "2026-01", "精度": {"数量": "0.000001", "单价": "0.0001", "金额": "0.01", "舍入": "ROUND_HALF_UP"}, "期间": [{"期间": "2026-01", "状态": "已结账", "核算版本": 1, "更新时间": "2026-10-27 17:44:44"}]}
+### --- 11. 开启 2026-02 并继续日常 ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py period open --path output/进销存台账.xlsx --period 2026-02 --operator demo
+{"ok": true, "period": "2026-02"}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/09_下月采购.csv --type purchase --commit --confirm 用户确认采购 --operator demo
+{"ok": 1, "batch": "B20261027174444-000009", "rejected": 0, "pending": 0, "reject_detail": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py import --path output/进销存台账.xlsx --file data/10_下月销售.csv --type sale --commit --confirm 用户确认销售 --operator demo
+{"ok": 1, "batch": "B20261027174444-000010", "rejected": 0, "pending": 0, "reject_detail": []}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py close final --path output/进销存台账.xlsx --period 2026-02 --confirm 用户确认结账 --operator demo
+{"ok": true, "期间": "2026-02", "异常": []}
+### --- 12. 两月结存核对(1月末=2月初 自动衔接) ---
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query monthly --path output/进销存台账.xlsx --period 2026-01
+{"ok": true, "期间": "2026-01", "状态": "已结账", "SKU": [{"SKU": "SKU-001", "期初数量": "150", "期初金额": "1500", "计价入库数量": "180", "计价入库金额": "2240", "附加费用分摊额": "75", "出库数量": "70", "出库成本": "809.24", "期末数量": "260", "期末金额": "3005.76", "加权单价": "11.5606", "物化期末金额": "3005.76"}, {"SKU": "SKU-002", "期初数量": "200", "期初金额": "1000", "计价入库数量": "100", "计价入库金额": "520", "附加费用分摊额": "75", "出库数量": "150", "出库成本": "824.09", "期末数量": "145", "期末金额": "770.91", "加权单价": "5.3167", "物化期末金额": "770.91"}]}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query monthly --path output/进销存台账.xlsx --period 2026-02
+{"ok": true, "期间": "2026-02", "状态": "已结账", "SKU": [{"SKU": "SKU-001", "期初数量": "260", "期初金额": "3005.76", "计价入库数量": "50", "计价入库金额": "750", "附加费用分摊额": "0", "出库数量": "100", "出库成本": "1211.54", "期末数量": "210", "期末金额": "2544.22", "加权单价": "12.1154", "物化期末金额": "2544.22"}, {"SKU": "SKU-002", "期初数量": "145", "期初金额": "770.91", "计价入库数量": "0", "计价入库金额": "0", "附加费用分摊额": "0", "出库数量": "0", "出库成本": "0", "期末数量": "145", "期末金额": "770.91", "加权单价": "5.3166", "物化期末金额": "770.91"}]}
+$ python3 /Users/yanbo/GitHub/Skills/inventory-ledger-skill/scripts/cli.py query stock --path output/进销存台账.xlsx
+{"ok": true, "期间": "2026-02", "状态": "已结账", "仓库": [{"期间": "2026-02", "SKU": "SKU-001", "仓库": "W01", "期初数量": "140", "计价入库数量": "0", "出库数量": "100", "调整数量": "0", "调拨净": "0", "期末数量": "40"}, {"期间": "2026-02", "SKU": "SKU-001", "仓库": "W02", "期初数量": "120", "计价入库数量": "50", "出库数量": "0", "调整数量": "0", "调拨净": "0", "期末数量": "170"}, {"期间": "2026-02", "SKU": "SKU-002", "仓库": "W01", "期初数量": "145", "计价入库数量": "0", "出库数量": "0", "调整数量": "0", "调拨净": "0", "期末数量": "145"}], "公司": [{"SKU": "SKU-001", "期末数量": "210", "期末金额": "2544.22", "加权单价": "12.1154", "待确认数量": "0"}, {"SKU": "SKU-002", "期末数量": "145", "期末金额": "770.91", "加权单价": "5.3166", "待确认数量": "0"}]}
+### ===== 演示结束: 台账与日志输出于 output/ =====
+生成文件:
+total 112
+drwxr-xr-x@  5 yanbo  staff    160 Oct 27 17:44 .
+drwxr-xr-x@  5 yanbo  staff    160 Oct 27 17:26 ..
+-rw-r--r--@  1 yanbo  staff  20317 Oct 27 17:44 进销存台账.xlsx
+drwxr-xr-x@ 30 yanbo  staff    960 Oct 27 17:44 backups
+-rw-r--r--@  1 yanbo  staff  36704 Oct 27 17:44 transcript.log

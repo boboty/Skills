@@ -470,11 +470,11 @@ def final_close(store: Store, period: str, operator: str,
         })
     store.set_period(period, S.PERIOD_CLOSED, operator,
                      f"正式结账, 用户确认: {confirmed_by}")
-    store.save()
     store.audit("close", operator,
                 f"正式结账 {period} (版本 {ver})",
                 f"用户确认: {confirmed_by}; 写回出库成本与月末结存",
                 f"P{period}", "成功")
+    store.save()
     return report
 
 
@@ -503,8 +503,8 @@ def reopen(store: Store, period: str, authorization: str, reason: str,
     for ap in affected:
         store.set_period(ap, S.PERIOD_OPEN, operator,
                          f"受控重开(级联), 授权: {authorization}, 原因: {reason}")
-    store.save()
     store.audit("reopen", operator,
                 f"受控重开 {period}" + (f", 级联 {affected[1:]}" if len(affected) > 1 else ""),
                 f"授权: {authorization}; 原因: {reason}; 原结存保留为历史版本",
                 f"P{'/'.join(affected)}", "成功")
+    store.save()

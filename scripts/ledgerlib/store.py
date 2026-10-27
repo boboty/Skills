@@ -117,9 +117,9 @@ class Store:
         st.set_meta(S.META_CREATED_AT, now_str())
         st.set_meta(S.META_WRITES, "0")
         st.set_period(start_period, S.PERIOD_OPEN, operator, "初始化")
-        st.save()
         st.audit("init", operator, f"初始化台账 {company} 起始期间 {start_period}",
                  "创建工作表与元数据", path, "成功")
+        st.save()
         return st
 
     @classmethod
