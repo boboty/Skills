@@ -65,14 +65,16 @@ def test_cross_period_fee_blocked(masters):
     ])
     close_final(masters, "2026-01")
     open_period(masters, "2026-02")
-    # 场景 A: 费用单落在 02(开放), 关联采购在 01(已结账) -> 跨期分摊被拒
-    post_fees(masters, [
-        {"业务日期": "2026-02-05", "费用单号": "F-CP-1", "关联采购单号": "PO-CP",
-         "费用总额": 10, "分摊规则": "按数量比例"},
-    ])
+    # 场景 A: 费用单落在 02(开放), 关联采购在 01(已结账) -> 登记阶段即拒绝(E16),
+    # 02 月不存在悬挂费用(否则无法分摊又无法结账)
     with pytest.raises(LedgerError) as ei:
-        allocate_fee(masters, "FEE-000001")
-    assert "E09" in reason_codes(ei), ei.value.message
+        post_fees(masters, [
+            {"业务日期": "2026-02-05", "费用单号": "F-CP-1",
+             "关联采购单号": "PO-CP", "费用总额": 10, "分摊规则": "按数量比例"},
+        ])
+    assert "E16" in reason_codes(ei), ei.value.message
+    with Store.open(masters, for_write=False) as st:
+        assert not any(r.get("费用单号") == "F-CP-1" for r in st.read_all("附加费用"))
     # 场景 B: 直接向已结账期间登记费用单 -> 期间保护拒绝
     with pytest.raises(LedgerError) as ei:
         post_fees(masters, [

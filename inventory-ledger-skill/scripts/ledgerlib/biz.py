@@ -172,6 +172,8 @@ def add_purchases(store: Store, rows: list[dict], operator: str,
             normalized.append(normalize_purchase(store, r, i, src, batch))
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
+    if not rejected:
+        _batch_internal_conflicts(normalized, rejected, "采购入库")
     if rejected:
         _raise_partial("采购入库", [], rejected)
     ids = []
@@ -315,6 +317,8 @@ def add_sales(store: Store, rows: list[dict], operator: str, confirmed_by: str,
             normalized.append(normalize_sale(store, r, i, src, batch))
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
+    if not rejected:
+        _batch_internal_conflicts(normalized, rejected, "销售出库")
     if rejected:
         _raise_partial("销售出库", [], rejected)
     _check_stock_available(store, normalized, "sale")
@@ -493,6 +497,14 @@ def add_fee(store: Store, rows: list[dict], operator: str, confirmed_by: str,
             in_doc = str(r.get("关联采购单号") or "").strip()
             if not doc or not in_doc:
                 raise LedgerError("E08", f"费用单号/关联采购单号不能为空: 行{i}")
+            # Fix2: 登记前验证关联采购单(须同月存在有效入库行, 防跨期悬挂)
+            related = [x for x in store.read_all(S.SHEET_IN)
+                       if x.get("单号") == in_doc and x.get("记录状态") == S.RECORD_OK
+                       and x.get("期间") == period]
+            if not related:
+                raise LedgerError("E16",
+                                  f"关联采购单 {in_doc} 在期间 {period} 无有效入库行"
+                                  f" (费用单须与采购同月且采购已入账; 跨期/未知采购单登记被拒绝)")
             # 费用单号防重
             for e in store.read_all(S.SHEET_FEE):
                 if e.get("费用单号") == doc:
@@ -630,6 +642,29 @@ def _require_date(d, line: int) -> str:
         raise LedgerError("E08", f"业务日期必须为 YYYY-MM-DD: 行{line} ({d})")
     # 拒绝退货以外的日期异常: 自然月边界由期间推导保证
     return d
+
+
+def _doc_key(row: dict) -> tuple:
+    """单据指纹键(与 _check_doc_fingerprint 字段组合一致): 期间+单号+明细行号+SKU+仓库。"""
+    return (str(row.get("期间") or ""), str(row.get("单号") or ""),
+            str(row.get("明细行号") or ""), str(row.get("SKU") or ""),
+            str(row.get("仓库") or ""))
+
+
+def _batch_internal_conflicts(rows: list[dict], rejected: list,
+                              label: str) -> None:
+    """Fix1: 同一批次内(尚未落库)行间指纹互查; 重复 -> rejected(E12),
+    由调用方统一整批拒绝。"""
+    seen: dict[tuple, int] = {}
+    for i, row in enumerate(rows, start=1):
+        key = _doc_key(row)
+        first = seen.get(key)
+        if first is not None:
+            rejected.append((i, "E12",
+                             f"{label}同批次重复: 与第 {first} 行单据指纹相同"
+                             f" (单号 {key[1]} 行 {key[2]} SKU {key[3]} @ {key[4]})"))
+        else:
+            seen[key] = i
 
 
 def _check_doc_fingerprint(store: Store, sheet: str, period: str, doc: str,

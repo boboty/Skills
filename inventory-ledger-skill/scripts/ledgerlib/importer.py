@@ -224,6 +224,25 @@ def preview(store: Store, path: str, imp_type: str) -> Preview:
             pr.pending.append(norm)
         else:
             pr.ok.append(norm)
+
+    # Fix1: 同批次内部(尚未落库)单据指纹互查, 重复行移入拒绝(E12);
+    # 保证"预览已识别"与"提交整批拒绝"行为一致。
+    if imp_type in ("purchase", "sale"):
+        keep_ok, keep_pend = [], []
+        seen: dict[tuple, str] = {}
+        for row in pr.ok + pr.pending:
+            key = (str(row.get("期间") or ""), str(row.get("单号") or ""),
+                   str(row.get("明细行号") or ""), str(row.get("SKU") or ""),
+                   str(row.get("仓库") or ""))
+            first = seen.get(key)
+            if first is not None:
+                pr.rejected.append((int(row.get("来源行号") or 0), "E12",
+                                    f"同批次重复: 与导入行 {first} 单据指纹相同"
+                                    f" (单号 {key[1]} 行 {key[2]} SKU {key[3]} @ {key[4]})"))
+            else:
+                seen[key] = str(row.get("来源行号") or "")
+                (keep_pend if row.get("成本状态") == S.COST_PENDING else keep_ok).append(row)
+        pr.ok, pr.pending = keep_ok, keep_pend
     return pr
 
 
@@ -246,6 +265,13 @@ def _normalize_fee(store: Store, r: dict, line: int, src: dict) -> dict:
     for e in store.read_all(S.SHEET_FEE):
         if e.get("费用单号") == doc:
             raise LedgerError("E12", f"费用单 {doc} 已存在({e.get('费用ID')})")
+    related = [x for x in store.read_all(S.SHEET_IN)
+               if x.get("单号") == in_doc and x.get("记录状态") == "正常"
+               and x.get("期间") == period]
+    if not related:
+        raise LedgerError("E16",
+                          f"关联采购单 {in_doc} 在期间 {period} 无有效入库行"
+                          f" (费用单须与采购同月且采购已入账)")
     return {"业务日期": biz_date, "费用单号": doc, "关联采购单号": in_doc,
             "分摊规则": rule, "费用总额": total, "备注": r.get("备注", ""),
             "来源文件": src["file"], "来源工作表": src["sheet"],
@@ -291,10 +317,11 @@ def commit(store: Store, path: str, imp_type: str, operator: str,
         raise LedgerError("E09",
                           f"{len(pr.rejected)} 行被拒绝, 未写入; 请修正后重新提交: "
                           + "; ".join(f"行{r} [{c}] {m}" for r, c, m in pr.rejected[:10]))
-    batch = "B" + __import__("time").strftime("%Y%m%d%H%M%S")
     src_base = {"file": pr.file_name, "sheet": "Sheet1" if pr.file_name.lower().endswith((".xlsx", ".xlsm")) else "CSV", "hash": pr.file_hash}
     with store.batch():  # 修复4b: 业务写入+导入登记+审计 单次原子写盘
         # (batch 内 store.save() 挂起, 任一环节失败整批不落盘)
+        # Fix3: 批次号唯一确定, 业务行/导入登记/审计引用同一 ID
+        batch = store.next_batch_id()
         n_ok = n_pending = 0
         if imp_type == "purchase":
             rows = [dict(x) for x in pr.ok + pr.pending]
@@ -352,7 +379,7 @@ def commit(store: Store, path: str, imp_type: str, operator: str,
     # 修复4b: 业务写入 + 导入登记 + 审计 一次原子提交(batch 内 save 挂起,
         batch_reg = store.register_import(pr.file_name, pr.file_hash, pr.file_size,
                                           imp_type, n_ok, len(pr.rejected), n_pending,
-                                          operator)
+                                          operator, batch)
         store.audit("import", operator,
                     f"导入 {imp_type} 文件 {pr.file_name} => 成功 {n_ok}, "
                     f"拒绝 {len(pr.rejected)}, 待确认 {n_pending}",

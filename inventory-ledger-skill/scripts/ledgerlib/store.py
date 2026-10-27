@@ -320,11 +320,17 @@ class Store:
         })
         return op_id
 
+    def next_batch_id(self) -> str:
+        """唯一、确定的导入批次号: 时间戳 + 导入序号(同秒连续导入不冲突)。"""
+        imp_id = self.next_id(S.SHEET_IMPORTS, "IMP-")
+        return f"B{time.strftime('%Y%m%d%H%M%S')}-{imp_id.split('-')[1]}"
+
     def register_import(self, file_name: str, file_hash: str, file_size: int,
                         imp_type: str, ok: int, reject: int, pending: int,
-                        operator: str) -> str:
+                        operator: str, batch: str | None = None) -> str:
         imp_id = self.next_id(S.SHEET_IMPORTS, "IMP-")
-        batch = f"B{time.strftime('%Y%m%d%H%M%S')}-{imp_id.split('-')[1]}"
+        if batch is None:  # 兼容旧调用: 自生成(历史台账读取不受影响)
+            batch = f"B{time.strftime('%Y%m%d%H%M%S')}-{imp_id.split('-')[1]}"
         self.append_row(S.SHEET_IMPORTS, {
             "导入ID": imp_id, "批次号": batch, "文件名": file_name,
             "文件摘要": file_hash, "文件大小": file_size, "导入类型": imp_type,
