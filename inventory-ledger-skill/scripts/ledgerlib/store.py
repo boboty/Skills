@@ -80,6 +80,23 @@ def sha256_of_file(path: str) -> str:
     return h.hexdigest()
 
 
+class _Batch:
+    """with store.batch(): 内的所有 save() 挂起; 退出时一次性写盘。"""
+
+    def __init__(self, st: "Store"):
+        self.st = st
+
+    def __enter__(self):
+        self.st._defer_save = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.st._defer_save = False
+        if exc_type is None:
+            self.st.save()  # 唯一一次真实写盘(含备份/原子替换/写后校验)
+        return False
+
+
 class Store:
     """一本台账 = 一个 xlsx 文件 + 缓存的行数据。"""
 
@@ -87,6 +104,7 @@ class Store:
         self.path = str(Path(path).resolve())
         self.wb = wb
         self.lock_owned = lock_owned
+        self._defer_save = False
 
     # ------------------------------------------------------------ 打开/创建
     @classmethod
@@ -323,6 +341,8 @@ class Store:
 
     # ------------------------------------------------------------ 保存
     def save(self) -> None:
+        if self._defer_save:
+            return  # batch 挂起: 由 batch 退出时一次性写盘(原子提交)
         if not self.lock_owned:
             raise LedgerError("E17", "只读打开, 禁止保存")
         writes = int(self.meta(S.META_WRITES, "0"))
@@ -352,6 +372,12 @@ class Store:
                 break
         if not found:
             raise LedgerError("E10", "写入后校验失败: 元数据未更新, 文件可能损坏")
+
+    def batch(self) -> "_Batch":
+        """原子批处理: 挂起 save() 直至退出; 正常退出写盘一次, 异常退出不写盘。"""
+        if self._defer_save:
+            raise LedgerError("E10", "不允许嵌套 batch(原子提交)")
+        return _Batch(self)
 
     def close(self) -> None:
         if self.lock_owned:

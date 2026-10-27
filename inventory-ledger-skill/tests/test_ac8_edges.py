@@ -86,9 +86,10 @@ def test_unit_mismatch_rejected_at_import(masters, tmp_path):
 
 # ---------------------------------------------------------------- E06/E07 零库存金额/尾差超限
 def test_zero_stock_with_amount_and_tail_over(masters):
-    """池 5000.00+0.03=5000.03, 数量 10001, 全月加权单价 0.499953...
-    -> 4 位单价 0.5000, 出库成本 = 0.5000×10001 = 5000.50 > 池,
-    期末金额 -0.47 且数量 0: 触发 E06(零库存带金额)与 E07(金额尾差超限)。"""
+    """大数量+除不尽单价+零结存: 内部全精度均价核算, 出库成本=池−期末(守恒恒等)。
+    池=5000.00+0.03=5000.03, 数量 10001, 内部均价 0.499953... (4 位显示 0.5000)。
+    全量售出 -> 期末金额 0.00, 出库成本=5000.03 精确守恒;
+    不触发 E06(零库存带金额)与 E07(尾差超限)误报。"""
     post_opening(masters, [{"SKU": "SKU-001", "仓库": "A",
                             "数量": 10000, "单价": 0.5}])
     post_purchases(masters, [
@@ -102,8 +103,14 @@ def test_zero_stock_with_amount_and_tail_over(masters):
     with open_write(masters) as st:
         m = engine.compute_month(st, "2026-01")
     codes = {c for c, _ in m.exceptions}
-    assert "E07" in codes, m.exceptions
-    assert "E06" in codes
+    assert "E07" not in codes, m.exceptions
+    assert "E06" not in codes, m.exceptions
+    sku = m.months["SKU-001"]
+    assert sku.pool_amount == Decimal("5000.03")
+    assert sku.end_qty == Decimal("0")
+    assert sku.end_amount == Decimal("0.00")              # 零结存零金额
+    assert sku.out_cost == Decimal("5000.03")             # 出库成本=全池
+    assert sku.end_amount + sku.out_cost == sku.pool_amount  # 完整成本守恒
 
 
 # ---------------------------------------------------------------- E08 自然月边界

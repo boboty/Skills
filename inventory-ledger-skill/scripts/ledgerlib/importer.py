@@ -293,66 +293,70 @@ def commit(store: Store, path: str, imp_type: str, operator: str,
                           + "; ".join(f"行{r} [{c}] {m}" for r, c, m in pr.rejected[:10]))
     batch = "B" + __import__("time").strftime("%Y%m%d%H%M%S")
     src_base = {"file": pr.file_name, "sheet": "Sheet1" if pr.file_name.lower().endswith((".xlsx", ".xlsm")) else "CSV", "hash": pr.file_hash}
-    n_ok = n_pending = 0
-    if imp_type == "purchase":
-        rows = [dict(x) for x in pr.ok + pr.pending]
-        for r in rows:
-            r["操作人"] = operator
-            r["用户确认"] = confirmed_by
-            r["导入批次"] = batch
-        res = biz.add_purchases(store, rows, operator, confirmed_by, src_base, batch)
-        n_ok = len(res["ids"])
-        n_pending = len(pr.pending)
-    elif imp_type == "sale":
-        rows = [dict(x) for x in pr.ok]
-        for r in rows:
-            r["操作人"] = operator
-            r["用户确认"] = confirmed_by
-            r["导入批次"] = batch
-        res = biz.add_sales(store, rows, operator, confirmed_by, src_base, batch)
-        n_ok = len(res["ids"])
-    elif imp_type == "transfer":
-        rows = [dict(x) for x in pr.ok]
-        for r in rows:
-            r["操作人"] = operator
-            r["用户确认"] = confirmed_by
-            r["导入批次"] = batch
-        res = biz.add_transfers(store, rows, operator, confirmed_by, src_base, batch)
-        n_ok = len(res["ids"])
-    elif imp_type == "adjust":
-        rows = [dict(x) for x in pr.ok]
-        for r in rows:
-            r["操作人"] = operator
-            r["用户确认"] = confirmed_by
-            r["导入批次"] = batch
-        res = biz.add_adjustments(store, rows, operator, confirmed_by, src_base, batch)
-        n_ok = len(res["ids"])
-    elif imp_type == "fee":
-        fee_rows = [{"业务日期": x["业务日期"], "费用单号": x["费用单号"],
-                     "关联采购单号": x["关联采购单号"], "费用总额": x["费用总额"],
-                     "分摊规则": x["分摊规则"], "备注": x.get("备注", "")}
-                    for x in pr.ok]
-        res = biz.add_fee(store, fee_rows, operator, confirmed_by, src_base, batch)
-        n_ok = res["posted"]
-    elif imp_type == "opening":
-        entries = [{"SKU": x["SKU"], "仓库": x["仓库"], "数量": x["数量"],
-                    "单价": x["单价"], "金额": x["金额"], "备注": x.get("备注", "")}
-                   for x in pr.ok]
-        res = None
-        biz.set_opening(store, entries, operator, confirmed_by,
-                        src=src_base, batch=batch)
-        n_ok = len(entries)
-    else:  # pragma: no cover
-        raise LedgerError("E09", f"未知类型 {imp_type}")
+    with store.batch():  # 修复4b: 业务写入+导入登记+审计 单次原子写盘
+        # (batch 内 store.save() 挂起, 任一环节失败整批不落盘)
+        n_ok = n_pending = 0
+        if imp_type == "purchase":
+            rows = [dict(x) for x in pr.ok + pr.pending]
+            for r in rows:
+                r["操作人"] = operator
+                r["用户确认"] = confirmed_by
+                r["导入批次"] = batch
+            res = biz.add_purchases(store, rows, operator, confirmed_by, src_base, batch)
+            n_ok = len(res["ids"])
+            n_pending = len(pr.pending)
+        elif imp_type == "sale":
+            rows = [dict(x) for x in pr.ok]
+            for r in rows:
+                r["操作人"] = operator
+                r["用户确认"] = confirmed_by
+                r["导入批次"] = batch
+            res = biz.add_sales(store, rows, operator, confirmed_by, src_base, batch)
+            n_ok = len(res["ids"])
+        elif imp_type == "transfer":
+            rows = [dict(x) for x in pr.ok]
+            for r in rows:
+                r["操作人"] = operator
+                r["用户确认"] = confirmed_by
+                r["导入批次"] = batch
+            res = biz.add_transfers(store, rows, operator, confirmed_by, src_base, batch)
+            n_ok = len(res["ids"])
+        elif imp_type == "adjust":
+            rows = [dict(x) for x in pr.ok]
+            for r in rows:
+                r["操作人"] = operator
+                r["用户确认"] = confirmed_by
+                r["导入批次"] = batch
+            res = biz.add_adjustments(store, rows, operator, confirmed_by, src_base, batch)
+            n_ok = len(res["ids"])
+        elif imp_type == "fee":
+            fee_rows = [{"业务日期": x["业务日期"], "费用单号": x["费用单号"],
+                         "关联采购单号": x["关联采购单号"], "费用总额": x["费用总额"],
+                         "分摊规则": x["分摊规则"], "备注": x.get("备注", ""),
+                         "来源行号": x.get("来源行号", "")}
+                        for x in pr.ok]
+            res = biz.add_fee(store, fee_rows, operator, confirmed_by, src_base, batch)
+            n_ok = res["posted"]
+        elif imp_type == "opening":
+            entries = [{"SKU": x["SKU"], "仓库": x["仓库"], "数量": x["数量"],
+                        "单价": x["单价"], "金额": x["金额"], "备注": x.get("备注", ""),
+                        "来源行号": x.get("来源行号", "")}
+                       for x in pr.ok]
+            res = None
+            biz.set_opening(store, entries, operator, confirmed_by,
+                            src=src_base, batch=batch)
+            n_ok = len(entries)
+        else:  # pragma: no cover
+            raise LedgerError("E09", f"未知类型 {imp_type}")
 
-    batch_reg = store.register_import(pr.file_name, pr.file_hash, pr.file_size,
-                                      imp_type, n_ok, len(pr.rejected), n_pending,
-                                      operator)
-    store.audit("import", operator,
-                f"导入 {imp_type} 文件 {pr.file_name} => 成功 {n_ok}, "
-                f"拒绝 {len(pr.rejected)}, 待确认 {n_pending}",
-                f"用户确认: {confirmed_by}; 批次: {batch_reg}", batch_reg, "成功")
-    store.save()
+    # 修复4b: 业务写入 + 导入登记 + 审计 一次原子提交(batch 内 save 挂起,
+        batch_reg = store.register_import(pr.file_name, pr.file_hash, pr.file_size,
+                                          imp_type, n_ok, len(pr.rejected), n_pending,
+                                          operator)
+        store.audit("import", operator,
+                    f"导入 {imp_type} 文件 {pr.file_name} => 成功 {n_ok}, "
+                    f"拒绝 {len(pr.rejected)}, 待确认 {n_pending}",
+                    f"用户确认: {confirmed_by}; 批次: {batch_reg}", batch_reg, "成功")
     return {"batch": batch_reg, "ok": n_ok, "rejected": len(pr.rejected),
             "pending": n_pending,
             "reject_detail": [{"row": r, "code": c, "reason": m}

@@ -63,7 +63,8 @@ class SkuMonth:
     pending_qty: Decimal = Decimal("0")   # 待确认采购物理数量
     transfer_net: Decimal = Decimal("0")  # 公司级恒为 0
     out_cost: Decimal = Decimal("0")
-    avg_price: Decimal | None = None      # 4 位; None=本池无动因
+    avg_price: Decimal | None = None      # 4 位(展示); None=本池无动因
+    avg_internal: Decimal | None = None   # 全精度内部均价(除不尽也参与核算)
     consumption: list[ConsumptionRow] = field(default_factory=list)
     end_amount: Decimal = Decimal("0")
 
@@ -299,18 +300,27 @@ def compute_month(store: Store, period: str, _depth: int = 0) -> CloseReport:
             if m.pool_amount != 0:
                 report.add_exc(EXC_ZERO_STOCK_AMOUNT,
                                f"SKU {sku}: 成本池金额 {m.pool_amount} 但池数量为 0")
+        if m.pool_qty > 0:
+            # 内部全精度均价: 展示列 price() 4 位, 核算用全精度(循环小数/大数量不丢尾差)
+            m.avg_internal = m.pool_amount / m.pool_qty
+            m.avg_price = price(m.avg_internal)
         if total_out_qty > 0 and m.pool_qty > 0:
-            m.avg_price = price(m.pool_amount / m.pool_qty)
-            weights = [c.qty * m.avg_price for c in cons]
-            target = money(m.avg_price * total_out_qty)
-            allocated = largest_remainder_allocate(weights, target)
+            pool_end_qty = m.pool_qty - total_out_qty
+            # 期末金额 = 期末池数量 × 内部均价(round2); 出库成本 = 池 − 期末,
+            # 由此 期末金额+出库成本 == 池金额 恒成立(完整成本守恒, E07 恒 ≤0.01)
+            m.end_amount = money(pool_end_qty * m.avg_internal)
+            m.out_cost = money(m.pool_amount - m.end_amount)
+            allocated = largest_remainder_allocate([c.qty for c in cons], m.out_cost)
             for c, v in zip(cons, allocated):
                 c.cost = v
-            m.out_cost = sum(allocated, Decimal("0"))
-        elif m.avg_price is None and m.pool_qty > 0:
-            m.avg_price = price(m.pool_amount / m.pool_qty)
-        # 期末金额(恒等守恒)
-        m.end_amount = money(m.pool_amount - m.out_cost)
+            if sum(allocated, Decimal("0")) != m.out_cost:  # largest_remainder 保证, 防御
+                report.add_exc("E07", f"SKU {sku}: 出库成本分配未守恒")
+        elif m.pool_qty > 0:
+            # 无出库: 期末金额 = 池金额(round2 已为 2 位, 恒等)
+            m.end_amount = money(m.pool_qty * m.avg_internal)
+            m.out_cost = Decimal("0")
+        else:
+            m.end_amount = Decimal("0")
 
     # ---------- 7. 期间级检查 ----------
     if period != start:
@@ -328,21 +338,24 @@ def compute_month(store: Store, period: str, _depth: int = 0) -> CloseReport:
             report.add_exc(EXC_COST_MISSING,
                            f"入库行 {r.get('入库ID')} 成本待确认, 须确认后方可结账")
 
-    # 附加费用核对: 未分摊 -> E04; 已分摊则 Σ行分摊额 = 费用总额
-    for f in store.read_all(S.SHEET_FEE):
-        if f.get("期间") != period:
-            continue
-        if f.get("分摊状态") != "已分摊":
-            report.add_exc(EXC_COST_MISSING,
-                           f"费用单 {f.get('费用ID')} 未分摊, 结账前须完成分摊")
-            continue
-        total = _num(f, "费用总额")
-        alloc = Decimal("0")
-        for r in _active_rows(store, S.SHEET_IN, period):
-            if r.get("单号") == f.get("关联采购单号"):
-                alloc += _num(r, "附加费用分摊额")
-        if alloc != total:
-            report.add_exc("E07", f"费用单 {f.get('费用ID')} 分摊合计 {alloc} != 总额 {total}")
+    # 附加费用核对(期间级汇总): 未分摊 -> E04; 全部已分摊则
+    # Σ(费用总额) 必须 == Σ(正常入库行附加费用分摊额)。
+    # 同采购单可挂多张费用单(行内分摊额为累计值), 故不按单核对, 而核对期间总额守恒。
+    f_docs = [f for f in store.read_all(S.SHEET_FEE) if f.get("期间") == period]
+    if f_docs:
+        fees_total = sum((_num(f, "费用总额") for f in f_docs), Decimal("0"))
+        unalloc = [f.get("费用ID") for f in f_docs
+                   if f.get("分摊状态") != "已分摊"]
+        row_total = sum((_num(r, "附加费用分摊额")
+                         for r in _active_rows(store, S.SHEET_IN, period)),
+                        Decimal("0"))
+        if unalloc:
+            for fid in unalloc:
+                report.add_exc(EXC_COST_MISSING,
+                               f"费用单 {fid} 未分摊, 结账前须完成分摊")
+        elif row_total != fees_total:
+            report.add_exc("E07", f"期间 {period}: 入库行附加费用分摊合计 {row_total} "
+                                  f"!= 费用总额合计 {fees_total}")
 
     # 负库存时序检查
     _check_negative_sequence(store, period, report)
@@ -353,11 +366,11 @@ def compute_month(store: Store, period: str, _depth: int = 0) -> CloseReport:
             report.add_exc(EXC_ZERO_STOCK_AMOUNT,
                            f"SKU {sku}: 期末数量 0 但期末金额 {m.end_amount}")
         pool_end_qty = m.end_qty - m.pending_qty
-        if m.avg_price is not None:
-            expect = money(pool_end_qty * m.avg_price)
+        if m.avg_internal is not None:
+            expect = money(pool_end_qty * m.avg_internal)
             if abs(expect - m.end_amount) > CENT:
                 report.add_exc(EXC_TAIL_OVER,
-                               f"SKU {sku}: 期末金额 {m.end_amount} 与 数量×单价 {expect} 差 "
+                               f"SKU {sku}: 期末金额 {m.end_amount} 与 数量×内部均价 {expect} 差 "
                                f"{abs(expect - m.end_amount)} > 0.01")
     # 公司=仓库合计
     wh_total: dict[str, Decimal] = {}

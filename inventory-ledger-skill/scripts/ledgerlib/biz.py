@@ -97,7 +97,8 @@ def set_opening(store: Store, entries: list[dict], operator: str,
                 "起始期间": start, "SKU": sku, "仓库": wh, "数量": q, "单价": p,
                 "金额": calc, "状态": S.RECORD_OK,
                 "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-                "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+                "来源行号": _src(src, "row") or e.get("来源行号", ""),
+                "文件摘要": _src(src, "hash"),
                 "导入批次": batch, "录入时间": now_str(), "操作人": operator,
                 "用户确认": confirmed_by, "备注": e.get("remark", ""),
             })
@@ -152,7 +153,8 @@ def normalize_purchase(store: Store, r: dict, line: int,
         "报关类型": r.get("报关类型", ""), "入库码": r.get("入库码", ""),
         "记录状态": S.RECORD_OK, "更正关联ID": "",
         "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-        "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+        "来源行号": _src(src, "row") or r.get("来源行号", ""),
+        "文件摘要": _src(src, "hash"),
         "导入批次": batch, "录入时间": now_str(), "操作人": r.get("_operator", ""),
         "用户确认": r.get("_confirmed_by", ""), "备注": r.get("备注", ""),
     }
@@ -242,7 +244,8 @@ def correct_purchase(store: Store, in_id: str, operator: str, confirmed_by: str,
         "入库ID": new_id, "期间": r.get("期间"), "业务日期": r.get("业务日期"),
         "单号": r.get("单号"), "明细行号": r.get("明细行号"),
         "SKU": r.get("SKU"), "仓库": r.get("仓库"), "数量": r.get("数量"),
-        "确认单价": p, "确认金额": amt, "附加费用分摊额": Decimal("0"),
+        "确认单价": p, "确认金额": amt,
+        "附加费用分摊额": money(r.get("附加费用分摊额") or "0"),  # 继承, 防止费用分摊丢失
         "成本状态": S.COST_CONFIRMED,
         "批次号": r.get("批次号", ""), "报关单号": r.get("报关单号", ""),
         "报关类型": r.get("报关类型", ""), "入库码": r.get("入库码", ""),
@@ -293,7 +296,8 @@ def normalize_sale(store: Store, r: dict, line: int,
         "物流单号": r.get("物流单号", ""), "出库成本": "",
         "记录状态": S.RECORD_OK, "更正关联ID": "",
         "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-        "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+        "来源行号": _src(src, "row") or r.get("来源行号", ""),
+        "文件摘要": _src(src, "hash"),
         "导入批次": batch, "录入时间": now_str(), "操作人": r.get("_operator", ""),
         "用户确认": r.get("_confirmed_by", ""), "备注": r.get("备注", ""),
     }
@@ -358,7 +362,8 @@ def normalize_transfer(store: Store, r: dict, line: int,
         "SKU": sku, "调出仓库": fw, "调入仓库": tw, "数量": q,
         "记录状态": S.RECORD_OK, "更正关联ID": "",
         "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-        "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+        "来源行号": _src(src, "row") or r.get("来源行号", ""),
+        "文件摘要": _src(src, "hash"),
         "导入批次": batch, "录入时间": now_str(), "操作人": r.get("_operator", ""),
         "用户确认": r.get("_confirmed_by", ""), "备注": r.get("备注", ""),
     }
@@ -435,7 +440,8 @@ def normalize_adjust(store: Store, r: dict, line: int,
         "计价金额": ba if q > 0 else "",
         "记录状态": S.RECORD_OK, "更正关联ID": "",
         "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-        "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+        "来源行号": _src(src, "row") or r.get("来源行号", ""),
+        "文件摘要": _src(src, "hash"),
         "导入批次": batch, "录入时间": now_str(), "操作人": r.get("_operator", ""),
         "用户确认": r.get("_confirmed_by", ""), "备注": r.get("备注", ""),
     }
@@ -497,7 +503,8 @@ def add_fee(store: Store, rows: list[dict], operator: str, confirmed_by: str,
                 "关联采购单号": in_doc, "分摊规则": rule, "费用总额": total,
                 "分摊状态": "未分摊",
                 "来源文件": _src(src, "file"), "来源工作表": _src(src, "sheet"),
-                "来源行号": _src(src, "row"), "文件摘要": _src(src, "hash"),
+                "来源行号": _src(src, "row") or r.get("来源行号", ""),
+                "文件摘要": _src(src, "hash"),
                 "导入批次": batch, "录入时间": now_str(), "操作人": operator,
                 "用户确认": confirmed_by, "备注": r.get("备注", ""),
             })
@@ -520,9 +527,13 @@ def plan_fee_allocation(store: Store, fee_id: str,
     if f is None:
         raise LedgerError("E16", f"费用单不存在: {fee_id}")
     rows = [r for r in store.read_all(S.SHEET_IN)
-            if r.get("单号") == f.get("关联采购单号") and r.get("记录状态") == S.RECORD_OK]
+            if r.get("单号") == f.get("关联采购单号")
+            and r.get("记录状态") == S.RECORD_OK
+            and r.get("期间") == f.get("期间")]
     if not rows:
-        raise LedgerError("E09", f"关联采购单 {f.get('关联采购单号')} 无有效入库行")
+        raise LedgerError("E09",
+                          f"关联采购单 {f.get('关联采购单号')} 在费用单期间"
+                          f" {f.get('期间')} 无有效入库行(费用单须与采购同月, 跨期分摊被拒绝)")
     total = money(f.get("费用总额"))
     rule = f.get("分摊规则")
     if rule == S.FEE_RULE_EXPLICIT:
@@ -563,7 +574,9 @@ def allocate_fee(store: Store, fee_id: str, operator: str, confirmed_by: str,
     alloc = {k: money(v) for k, v in plan["alloc"].items()}
     for r in store.read_all(S.SHEET_IN):
         if r.get("入库ID") in alloc:
-            store.update_cell(S.SHEET_IN, r["_row"], "附加费用分摊额", alloc[r.get("入库ID")])
+            old = money(r.get("附加费用分摊额") or "0")
+            store.update_cell(S.SHEET_IN, r["_row"], "附加费用分摊额",
+                              money(old + alloc[r.get("入库ID")]))  # 累计, 非覆盖
     store.update_cell(S.SHEET_FEE, f["_row"], "分摊状态", "已分摊")
     store.audit("fee_alloc", operator,
                 f"附加费用分摊 {fee_id} -> {plan['related_doc']} "
