@@ -1,7 +1,12 @@
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# macOS
 .DS_Store
+
+# 台账数据与备份(不提交业务数据点位/原始参考文件)
 backups/
 库存进销存台账.xlsx
 *_备份.xlsx
