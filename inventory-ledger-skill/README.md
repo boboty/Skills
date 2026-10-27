@@ -30,15 +30,52 @@ inventory-ledger-skill/
 
 ## 安装
 
-1. 克隆/复制本目录到智能体的 skills 目录:
-   - **Claude Code**: `~/.claude/skills/inventory-ledger-skill/`
-   - **Codex**: `~/.codex/skills/`
-   - **DSH**: 按 DSH 技能装载方式指向本目录
-   (或直接在任何工作区使用绝对路径调用 `scripts/cli.py`。)
-2. 依赖: `python3`(≥3.9) + `openpyxl`(≥3.1); 测试另需 `pytest`(≥8):
-   ```bash
-   python3 -m pip install -r requirements.txt
-   ```
+来源仓库: `https://github.com/boboty/Skills`,技能目录 `inventory-ledger-skill/`。
+
+### 方式 A: npx skills 安装(推荐, Claude Code / Codex)
+
+需要 Node.js ≥ 22.20。`-g` 为全局安装(对所有项目可用); 去掉 `-g` 则仅装入当前项目:
+
+```bash
+# Claude Code(落盘 ~/.claude/skills/inventory-ledger-skill/)
+npx skills add boboty/Skills --skill inventory-ledger-skill -g -a claude-code
+
+# Codex(落盘 ~/.agents/skills/inventory-ledger-skill/)
+npx skills add boboty/Skills --skill inventory-ledger-skill -g -a codex
+
+# 不带 -a 时, 自动安装到本机已检测到的全部智能体(实测: 未检测到智能体时按 -y 全量安装)
+npx skills add boboty/Skills --skill inventory-ledger-skill -g -y
+```
+
+> Codex 与多种 CLI 共用 `~/.agents/skills/`(项目级为 `<项目>/.agents/skills/`)。
+
+### 方式 B: 手动复制(Claude Code / Codex / DSH 通用)
+
+| 智能体 | 技能目录 |
+|---|---|
+| Claude Code | `~/.claude/skills/inventory-ledger-skill/` |
+| Codex | `~/.agents/skills/inventory-ledger-skill/`(或项目 `.agents/skills/`) |
+| DSH(DeepSeek Harness) | `~/.agents/skills/inventory-ledger-skill/`(全局), 或 `<项目>/.agents/skills/`、`<项目>/.dsh/skills/`(项目级) |
+
+> DSH 说明: DSH 的技能发现按序扫描 项目 `.dsh/skills` → 项目 `.agents/skills` → 自定义目录 → 用户 `~/.dsh/skills` → 用户 `~/.agents/skills`; 将本目录复制到任一扫描根即可, 新会话的技能目录中应出现 `inventory-ledger-skill`。
+
+### 依赖与环境自检
+
+```bash
+# 1. Python 版本(需 ≥ 3.9)
+python3 --version
+
+# 2. 安装依赖(openpyxl≥3.1; pytest≥8 仅测试需要)
+python3 -m pip install -r requirements.txt
+
+# 3. 验证 openpyxl 可导入
+python3 -c "import openpyxl; print('openpyxl', openpyxl.__version__)"
+
+# 4. 运行自动化测试(应 57 passed)
+cd <技能目录> && python3 -m pytest tests -q
+```
+
+自检全部通过即安装完成, 无需其他配置; 之后用自然语言向智能体描述业务即可(`SKILL.md` 会自动指引智能体操作)。
 
 ## 快速开始
 
