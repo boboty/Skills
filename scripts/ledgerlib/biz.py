@@ -70,6 +70,10 @@ def set_opening(store: Store, entries: list[dict], operator: str,
         raise LedgerError("E08", "起始期间已存在业务流水, 期初禁止重设; 如需修正请走受控更正")
     if not entries:
         raise LedgerError("E08", "期初明细为空")
+    # 重设: 先作废已有正常期初行, 再写入新行(原行保留可追溯)
+    for r in store.read_all(S.SHEET_OPENING):
+        if r.get("起始期间") == start and r.get("状态") == S.RECORD_OK:
+            store.update_cell(S.SHEET_OPENING, r["_row"], "状态", S.RECORD_VOID)
     posted = []
     rejected = []
     for i, e in enumerate(entries):
@@ -181,8 +185,9 @@ def add_purchases(store: Store, rows: list[dict], operator: str,
 
 
 def confirm_cost(store: Store, in_ids: list[str], operator: str,
-                 confirmed_by: str, basis: str) -> dict:
-    """确认待确认采购成本的依据(单价/金额必须已有)。"""
+                 confirmed_by: str, basis: str,
+                 new_price=None, new_amount=None) -> dict:
+    """确认待确认采购成本。可同时补充确认单价/金额(未填时沿用行内已有值)。"""
     if not basis:
         raise LedgerError("E08", "成本确认必须提供确认依据(basis)")
     done = []
@@ -190,13 +195,21 @@ def confirm_cost(store: Store, in_ids: list[str], operator: str,
         r = _by_id(store, S.SHEET_IN, "入库ID", rid)
         if r is None:
             raise LedgerError("E16", f"入库行不存在: {rid}")
-        if r.get("成本状态") == S.COST_CONFIRMED:
-            done.append(rid)
-            continue
         store.ensure_period_open(r.get("期间"))
-        if r.get("确认单价") in (None, "") and r.get("确认金额") in (None, ""):
-            raise LedgerError("E04", f"入库行 {rid} 尚无单价/金额, 不能确认成本")
-        store.update_cell(S.SHEET_IN, r["_row"], "成本状态", S.COST_CONFIRMED)
+        p = r.get("确认单价")
+        if new_price not in (None, ""):
+            p = price(new_price)
+        if p in (None, "") and new_amount in (None, ""):
+            raise LedgerError("E04", f"入库行 {rid} 缺少单价且未提供新单价, 不能确认成本")
+        if p in (None, ""):
+            p = price(new_amount / qty_num(r.get("数量")))
+        amt = money(qty_num(r.get("数量")) * p)
+        if new_amount not in (None, "") and abs(money(new_amount) - amt) > Decimal("0.01"):
+            raise LedgerError("E07", f"确认金额 {money(new_amount)} 与 数量×单价 {amt} 不符")
+        if p != r.get("确认单价") or r.get("成本状态") != S.COST_CONFIRMED:
+            store.update_cell(S.SHEET_IN, r["_row"], "确认单价", p)
+            store.update_cell(S.SHEET_IN, r["_row"], "确认金额", amt)
+            store.update_cell(S.SHEET_IN, r["_row"], "成本状态", S.COST_CONFIRMED)
         done.append(rid)
     store.audit("confirm", operator, f"确认采购成本 {len(done)} 行", f"依据: {basis}",
                 ",".join(done), "成功")
@@ -299,7 +312,7 @@ def add_sales(store: Store, rows: list[dict], operator: str, confirmed_by: str,
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
     if rejected:
-        _raise_partial("销售出库", [], rejected, None)
+        _raise_partial("销售出库", [], rejected)
     _check_stock_available(store, normalized, "sale")
     ids = []
     for row in normalized:
@@ -363,7 +376,7 @@ def add_transfers(store: Store, rows: list[dict], operator: str,
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
     if rejected:
-        _raise_partial("调拨", [], rejected, None)
+        _raise_partial("调拨", [], rejected)
     _check_stock_available(store, normalized, "transfer")
     ids = []
     for row in normalized:
@@ -440,7 +453,7 @@ def add_adjustments(store: Store, rows: list[dict], operator: str,
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
     if rejected:
-        _raise_partial("库存调整", [], rejected, None)
+        _raise_partial("库存调整", [], rejected)
     # 负向调整实时校验
     _check_stock_available(store, normalized, "adjust")
     ids = []
@@ -492,7 +505,7 @@ def add_fee(store: Store, rows: list[dict], operator: str, confirmed_by: str,
         except LedgerError as ex:
             rejected.append((i, ex.code, ex.message))
     if rejected:
-        _raise_partial("附加费用", [], rejected, None)
+        _raise_partial("附加费用", [], rejected)
     store.audit("fee", operator, f"登记附加费用 {len(posted)} 张(待分摊)",
                 f"用户确认: {confirmed_by}", "", "成功")
     store.save()
@@ -737,3 +750,20 @@ def _check_stock_available(store: Store, normalized: list[dict], kind: str) -> N
         if b + delta < 0:
             raise LedgerError("E03", f"仓库 {wh} SKU {sku} 库存不足: 现有 {b}, 本次 {delta}")
         balances[k] = b + delta
+
+
+def open_period(store: Store, period: str, operator: str) -> dict:
+    """按自然月顺序开启新期间(必须紧接当前最新期间)。"""
+    from .store import is_period_valid, next_period
+    if not is_period_valid(period):
+        raise LedgerError("E08", f"期间格式应为 {S.PERIOD_FMT}: {period}")
+    if store.get_period(period) is not None:
+        raise LedgerError("E12", f"期间 {period} 已登记, 无需重复开启")
+    latest = store.latest_period()
+    if latest and period != next_period(latest):
+        raise LedgerError("E13",
+                          f"期间必须按顺序逐月开启: 当前最新 {latest}, 只能开启 {next_period(latest)}")
+    store.set_period(period, S.PERIOD_OPEN, operator, "开启新期间")
+    store.audit("period", operator, f"开启期间 {period}", "", period, "成功")
+    store.save()
+    return {"period": period}

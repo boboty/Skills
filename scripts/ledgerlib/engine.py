@@ -352,7 +352,7 @@ def compute_month(store: Store, period: str, _depth: int = 0) -> CloseReport:
             report.add_exc(EXC_ZERO_STOCK_AMOUNT,
                            f"SKU {sku}: 期末数量 0 但期末金额 {m.end_amount}")
         pool_end_qty = m.end_qty - m.pending_qty
-        if m.avg_price is not None and pool_end_qty > 0:
+        if m.avg_price is not None:
             expect = money(pool_end_qty * m.avg_price)
             if abs(expect - m.end_amount) > CENT:
                 report.add_exc(EXC_TAIL_OVER,

@@ -99,6 +99,8 @@ def main(argv=None) -> int:
     sp2 = ssub.add_parser("confirm", parents=[common])
     sp2.add_argument("--ids", required=True)
     sp2.add_argument("--basis", required=True)
+    sp2.add_argument("--price", default="", help="补充确认单价(可选)")
+    sp2.add_argument("--amount", default="", help="补充确认金额(可选)")
     sp2.add_argument("--confirm", default="")
     sp2 = ssub.add_parser("correct", parents=[common])
     sp2.add_argument("--id", required=True)
@@ -106,6 +108,12 @@ def main(argv=None) -> int:
     sp2.add_argument("--new-amount", default="")
     sp2.add_argument("--basis", required=True)
     sp2.add_argument("--confirm", default="")
+
+    # period open
+    sp = add("period", "期间管理")
+    ssub = sp.add_subparsers(dest="sub", required=True)
+    sp2 = ssub.add_parser("open", parents=[common])
+    sp2.add_argument("--period", required=True)
 
     # close / reopen
     sp = add("close", "期间结账")
@@ -211,7 +219,8 @@ def _dispatch(args, path: str, operator: str) -> int:
                 st.close()
                 return _err(LedgerError("E08", "成本确认必须提供 --confirm 用户确认"))
             ids = [x.strip() for x in a.ids.split(",") if x.strip()]
-            res = biz.confirm_cost(st, ids, operator, a.confirm, a.basis)
+            res = biz.confirm_cost(st, ids, operator, a.confirm, a.basis,
+                                   a.price or None, a.amount or None)
             st.close()
             return _ok(res)
         if not a.confirm:
@@ -219,6 +228,11 @@ def _dispatch(args, path: str, operator: str) -> int:
             return _err(LedgerError("E08", "成本更正必须提供 --confirm 用户确认"))
         res = biz.correct_purchase(st, a.id, operator, a.confirm, a.basis,
                                    a.new_price or None, a.new_amount or None)
+        st.close()
+        return _ok(res)
+    if a.cmd == "period":
+        st = _open(path, write=True)
+        res = biz.open_period(st, a.period, operator)
         st.close()
         return _ok(res)
     if a.cmd == "close":
