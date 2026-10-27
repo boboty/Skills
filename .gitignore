@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+backups/
+库存进销存台账.xlsx
+*_备份.xlsx
