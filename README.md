@@ -20,4 +20,4 @@ npx skills add boboty/Skills --skill inventory-ledger-skill -g -a codex
 
 ## 许可证
 
-本仓库当前**未授权任何开源许可证**（待定，按需求方确认后再添加 LICENSE 文件）。
+[MIT License](LICENSE)（Copyright (c) 2026 boboty）。
