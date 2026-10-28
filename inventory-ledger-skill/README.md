@@ -1,12 +1,22 @@
 # 进销存台账 V1 (inventory-ledger-skill)
 
-通用进销存技能, 供 **Claude Code / Codex / DSH** 等智能体调用。
-自然语言 + 业务文件(CVS/XLSX)维护采购、销售、库存、调拨、月末成本;
+通用进销存技能, 供 **WorkBuddy / Claude Code / Codex / DSH** 等智能体调用。
+自然语言 + 业务文件(CSV/XLSX)维护采购、销售、库存、调拨、月末成本;
 **Excel 单文件持久化, 程序确定性计算, 全程可追溯**。
 
 - AI 职责: 理解业务 → 生成结构化导入文件 → 预览/确认 → 汇报数字。
 - 程序职责: 校验、月末一次加权平均成本、结账保护、幂等防重、审计。
 - 明确不做: FIFO、多公司、多币种、退货、增值税/税务、凭证、ERP、Web/数据库(V2 候选)。
+
+## 装好后怎么开始（业务人员只看这里）
+
+在智能体的新对话中选择或启用 **inventory-ledger-skill**（如已自动识别则无需手动选择），只说一句：
+
+> **我想开始使用进销存**
+
+技能会询问你想 **① 体验示例 ② 新建台账 ③ 导入已有数据 ④ 继续使用**。回复数字即可继续；也可以直接说“我想查询库存”或“帮我录一张采购单”。不需要手写 CSV 或运行命令。
+
+第一次创建自己的台账时，技能会询问公司名称、起始月份和**长期保存的文件夹**；在得到确认前不会擅自建账。体验示例是模拟数据，和真实台账分开。查询、导入预览、试结账可以直接查看；正式写入和结账需要你确认。
 
 ## 目录结构
 
@@ -49,13 +59,14 @@ npx skills add boboty/Skills --skill inventory-ledger-skill -g -y
 
 > Codex 与多种 CLI 共用 `~/.agents/skills/`(项目级为 `<项目>/.agents/skills/`)。
 
-### 方式 B: 手动复制(Claude Code / Codex / DSH 通用)
+### 方式 B: 手动复制(WorkBuddy / Claude Code / Codex / DSH 通用)
 
 | 智能体 | 技能目录 |
 |---|---|
 | Claude Code | `~/.claude/skills/inventory-ledger-skill/` |
 | Codex | `~/.agents/skills/inventory-ledger-skill/`(或项目 `.agents/skills/`) |
 | DSH(DeepSeek Harness) | `~/.agents/skills/inventory-ledger-skill/`(全局), 或 `<项目>/.agents/skills/`、`<项目>/.dsh/skills/`(项目级) |
+| WorkBuddy（已实测） | `~/.workbuddy-ai/skills/inventory-ledger-skill/`（用户级，具体以实际安装环境为准） |
 
 > DSH 说明: DSH 的技能发现按序扫描 项目 `.dsh/skills` → 项目 `.agents/skills` → 自定义目录 → 用户 `~/.dsh/skills` → 用户 `~/.agents/skills`; 将本目录复制到任一扫描根即可, 新会话的技能目录中应出现 `inventory-ledger-skill`。
 
@@ -71,13 +82,13 @@ python3 -m pip install -r requirements.txt
 # 3. 验证 openpyxl 可导入
 python3 -c "import openpyxl; print('openpyxl', openpyxl.__version__)"
 
-# 4. 运行自动化测试(应 62 passed)
+# 4. 运行自动化测试(应 63 passed)
 cd <技能目录> && python3 -m pytest tests -q
 ```
 
-自检全部通过即安装完成, 无需其他配置; 之后用自然语言向智能体描述业务即可(`SKILL.md` 会自动指引智能体操作)。
+自检全部通过即安装完成, 无需其他业务配置; 之后按上面的“装好后怎么开始”进行对话即可。
 
-## 快速开始
+## 命令行参考（智能体/开发者）
 
 ```bash
 # 1. 初始化台账(公司名/起始期间问用户, 不猜)
@@ -108,7 +119,7 @@ python3 scripts/cli.py period open    --path 进销存台账.xlsx --period 2026-
 ## 测试
 
 ```bash
-python3 -m pytest tests -q        # 期望 62 passed
+python3 -m pytest tests -q        # 期望 63 passed
 ```
 测试覆盖: AC1 多仓统一成本(10.80/140/40/180/756/1944)与 AC2 附加费用(11.20/784/2016)
 精确数字、AC3 先销后购统一加权、AC4 调拨双边一致防重、AC5 成本更正重算、
@@ -116,7 +127,7 @@ AC6 结账保护/受控重开/级联重算、AC7 导入幂等/单据冲突、AC8
 Decimal 尾差最大余数法确定性、V1 定向修复回归(同单多费累计/跨期费用/更正继承/
 导入原子与来源行号/成本内部全精度守恒)、数据完整性回归(批次内防重/费用登记前
 关联校验/统一批次号关联 业务行-导入登记-审计)、销售预览与提交库存校验一致性
-(预览即 E03/批次累计超量识别/提交独立重检)。
+(预览即 E03/批次累计超量识别/提交独立重检)、受限环境重复保存备份目录兼容。
 
 ## 冻结口径摘要
 
