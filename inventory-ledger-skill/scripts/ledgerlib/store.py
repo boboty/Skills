@@ -358,7 +358,9 @@ class Store:
             bak = Path(self.path).parent / "backups" / (
                 f"{Path(self.path).stem}_{time.strftime('%Y%m%d_%H%M%S')}_"
                 f"{sha256_of_file(self.path)[:8]}.xlsx")
-            bak.parent.mkdir(exist_ok=True)
+            # 部分受限执行环境在目录已存在时对 Path.mkdir(exist_ok=True)
+            # 仍抛 EEXIST；os.makedirs 在这些环境中可安全重复调用。
+            os.makedirs(bak.parent, exist_ok=True)
             shutil.copy2(self.path, bak)
         # 2) 原子替换写入
         tmp = self.path + f".tmp{os.getpid()}"
