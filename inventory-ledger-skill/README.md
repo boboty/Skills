@@ -71,7 +71,7 @@ python3 -m pip install -r requirements.txt
 # 3. 验证 openpyxl 可导入
 python3 -c "import openpyxl; print('openpyxl', openpyxl.__version__)"
 
-# 4. 运行自动化测试(应 57 passed)
+# 4. 运行自动化测试(应 62 passed)
 cd <技能目录> && python3 -m pytest tests -q
 ```
 
@@ -108,14 +108,15 @@ python3 scripts/cli.py period open    --path 进销存台账.xlsx --period 2026-
 ## 测试
 
 ```bash
-python3 -m pytest tests -q        # 期望 57 passed
+python3 -m pytest tests -q        # 期望 62 passed
 ```
 测试覆盖: AC1 多仓统一成本(10.80/140/40/180/756/1944)与 AC2 附加费用(11.20/784/2016)
 精确数字、AC3 先销后购统一加权、AC4 调拨双边一致防重、AC5 成本更正重算、
 AC6 结账保护/受控重开/级联重算、AC7 导入幂等/单据冲突、AC8 异常边界(E01–E18)、
 Decimal 尾差最大余数法确定性、V1 定向修复回归(同单多费累计/跨期费用/更正继承/
 导入原子与来源行号/成本内部全精度守恒)、数据完整性回归(批次内防重/费用登记前
-关联校验/统一批次号关联 业务行-导入登记-审计)。
+关联校验/统一批次号关联 业务行-导入登记-审计)、销售预览与提交库存校验一致性
+(预览即 E03/批次累计超量识别/提交独立重检)。
 
 ## 冻结口径摘要
 

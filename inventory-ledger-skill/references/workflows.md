@@ -66,6 +66,8 @@ python3 scripts/cli.py import --path 台账.xlsx --file 采购_2026-01.csv \
 ```
 输出 JSON: `ok_count / pending_count / reject_count / rejected[{row,code,reason}] / imported_before`。
 
+- 销售预览与提交共用同一库存可用量校验: 单行超量或同批多次出库累计超出仓库可用量,
+  预览即报告 E03(与提交阶段的判定一致)。
 - `imported_before: true` -> 该文件已导入过, 不能再次提交(幂等, E12)。
 - `rejected` 非空 -> 逐行向用户说明原因, 等待裁决(改文件重导 / 部分写入需明确授权 `--allow-partial`)。
 

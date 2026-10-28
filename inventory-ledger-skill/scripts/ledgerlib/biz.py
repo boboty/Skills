@@ -730,13 +730,22 @@ def check_stock_snapshot(store: Store, period: str) -> dict:
     return out
 
 
-def _check_stock_available(store: Store, normalized: list[dict], kind: str) -> None:
-    """按 (业务日期, 录入时间, ID) 时序校验调出/出库/负向调整不产生负库存。
+def check_stock_batch(store: Store, normalized: list[dict], kind: str
+                      ) -> list[tuple[int, str]]:
+    """共享纯库存可用量校验(预览与提交同一规则, 不产生两套口径)。
+
+    按 (业务日期, 录入时间, ID) 时序推演: 期初 + 期间内既有流水(本批视为发生在
+    最后, 保守且确定) -> 批内逐行扣减。返回违约行列表 [(批内行号 1 基, 消息)],
+    空列表 = 全部可用。
+
+    批内累计超量同样被识别: 逐行推演而非逐行独立检查——先扣减的行消耗库存,
+    后续行看到的是扣减后余额, 因此"各行单独可用、合计超量"会命中后续行;
+    违约行之后的同仓库行继续推演, 一并归入违约(提交整批拒绝时同样不会落库)。
 
     kind: "sale" 减少; "adjust" 按行符号; "transfer" 仅调出侧检查。
     """
     if not normalized:
-        return
+        return []
     period = normalized[0].get("期间")
     report = compute_month(store, period)
     balances: dict[tuple[str, str], Decimal] = {
@@ -780,24 +789,35 @@ def _check_stock_available(store: Store, normalized: list[dict], kind: str) -> N
                 break
         balances[k] = bal
 
-    for i, row in enumerate(normalized):
+    violations: list[tuple[int, str]] = []
+    for i, row in enumerate(normalized, start=1):
         sku = row.get("SKU")
         q = qty_num(row.get("数量"))
         if kind == "transfer":
             fw = row.get("调出仓库")
             b = balances.get((sku, fw), Decimal("0"))
             if b - q < 0:
-                raise LedgerError("E03", f"调出仓库 {fw} SKU {sku} 可用 {b} 不足 {q}")
+                violations.append((i, f"调出仓库 {fw} SKU {sku} 可用 {b} 不足 {q}"))
             balances[(sku, fw)] = b - q
-            balances[(sku, row.get("调入仓库"))] =                 balances.get((sku, row.get("调入仓库")), Decimal("0")) + q
+            balances[(sku, row.get("调入仓库"))] = (
+                balances.get((sku, row.get("调入仓库")), Decimal("0")) + q)
             continue
         wh = row.get("仓库")
         delta = -q if kind == "sale" else q
         k = (sku, wh)
         b = balances.get(k, Decimal("0"))
         if b + delta < 0:
-            raise LedgerError("E03", f"仓库 {wh} SKU {sku} 库存不足: 现有 {b}, 本次 {delta}")
+            violations.append((i, f"仓库 {wh} SKU {sku} 库存不足: 现有 {b}, 本次 {delta}"))
         balances[k] = b + delta
+    return violations
+
+
+def _check_stock_available(store: Store, normalized: list[dict], kind: str) -> None:
+    """提交路径: 复用共享校验, 首个违约行抛 E03(整批拒绝, 不落库)。"""
+    violations = check_stock_batch(store, normalized, kind)
+    if violations:
+        _, msg = violations[0]
+        raise LedgerError("E03", msg)
 
 
 def open_period(store: Store, period: str, operator: str) -> dict:

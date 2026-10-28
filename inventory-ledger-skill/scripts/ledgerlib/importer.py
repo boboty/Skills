@@ -243,6 +243,18 @@ def preview(store: Store, path: str, imp_type: str) -> Preview:
                 seen[key] = str(row.get("来源行号") or "")
                 (keep_pend if row.get("成本状态") == S.COST_PENDING else keep_ok).append(row)
         pr.ok, pr.pending = keep_ok, keep_pend
+
+    # 销售预览库存可用量校验(E03): 与提交同一共享纯逻辑(biz.check_stock_batch),
+    # 批内逐行推演, 单行超量与同批次多行累计超量一并识别, 违约行移入 rejected;
+    # 仅为预览分类(不写盘)——提交阶段仍对当前台账状态独立重新校验, 不依赖本结果。
+    if imp_type == "sale" and pr.ok:
+        violations = biz.check_stock_batch(store, pr.ok, "sale")
+        if violations:
+            flagged = {i - 1 for i, _ in violations}
+            for i, msg in violations:
+                row = pr.ok[i - 1]
+                pr.rejected.append((int(row.get("来源行号") or 0), "E03", msg))
+            pr.ok = [row for j, row in enumerate(pr.ok) if j not in flagged]
     return pr
 
 
